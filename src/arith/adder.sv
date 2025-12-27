@@ -16,7 +16,7 @@ module adder #(
 
       for (genvar i = 0; i < WIDTH; i = i + 1) begin
         if (i == 0) begin
-          full_adder fa_inst (
+          fa fa_inst (
               .a   (in0[i]),
               .b   (in1[i]),
               .cin (cin),
@@ -34,7 +34,7 @@ module adder #(
         end
       end
       assign sum  = sum_i;
-      assign cout = carry_i[WIDTH];
+      assign cout = carry_i[WIDTH-1];
     end else if (ALGORITHM == 1) begin  /* Carry-Look-Ahead Adder */
       localparam integer CLA_WIDTH = 4;
       localparam integer CLA_COUNT = WIDTH / CLA_WIDTH;

@@ -1,7 +1,7 @@
 module adder_pipe #(
     parameter integer WIDTH = 16,
     parameter integer NUM_ADDERS = 4,
-    parameter integer ALGORITHM = 1  // 0: Ripple-Carry, 1: Carry-Look-Ahead
+    parameter integer ALGORITHM = 0  // 0: Ripple-Carry, 1: Carry-Look-Ahead
 ) (
     input  logic             clk,
     input  logic [WIDTH-1:0] in0,
