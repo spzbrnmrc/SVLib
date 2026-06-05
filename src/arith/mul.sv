@@ -117,13 +117,13 @@ module mul #(
             .s                  (s[i])
         );
 
-        assign pp_out[i] = {1'b1, p[i], pp_out_i[WIDTH:0], 1'b0, s[i-1]} << (2 * (i - 1));
+        assign pp_out[i] = ({{(2 * WIDTH - (WIDTH + 5)){1'b0}}, 1'b1, p[i], pp_out_i[WIDTH:0], 1'b0, s[i-1]}) << (2 * (i - 1));
       end
     end
   endgenerate
 
   generate
-    if (PIPE_STAGE_AFTER_BOOTH) begin : gen_flops_unsign
+    if (PIPE_STAGE_AFTER_BOOTH != 0) begin : gen_flops_unsign
       register #(1) unsign_dff_inst (
           .clk (clk),
           .din (unsign),
@@ -134,8 +134,10 @@ module mul #(
     end
   endgenerate
 
-  localparam NUM_LAYERS = $clog2(WIDTH / 2 / 4);
-  logic [2*WIDTH-1:0] cf[NUM_LAYERS+1:0];
+  localparam integer NUM_CSA_LAYERS =
+      (WIDTH >= 64) ? 3 : (WIDTH >= 32) ? 2 : (WIDTH >= 16) ? 1 : 0;
+  localparam integer NUM_CF_STAGES = NUM_CSA_LAYERS + 1;
+  logic [2*WIDTH-1:0] cf[NUM_CF_STAGES:0];
 
   assign cf[0] = (unsign_i) ?  pp_out[WIDTH/2] | {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}} : {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}};
 
@@ -163,27 +165,37 @@ module mul #(
   endgenerate
 
   generate
+    if (PIPE_STAGE_CSA_LR1 != 0 && WIDTH >= 8) begin : gen_flops_layer_0_cf
+      register #(
+          .WIDTH(2 * WIDTH)
+      ) cf_dff_inst (
+          .clk (clk),
+          .din (cf[0]),
+          .dout(cf[1])
+      );
+    end else if (WIDTH >= 8) begin : gen_flops_layer_0_cf_bypass
+      assign cf[1] = cf[0];
+    end
+
     for (genvar i = 0; i < WIDTH / 2 / 4; i = i + 1) begin : gen_flops_layer_0_csa
-      if (PIPE_STAGE_CSA_LR1 & WIDTH >= 8) begin : gen_flops_layer_0_csa
-        register #(2 * WIDTH) pp_sum_lr0_dff_inst (
+      if (PIPE_STAGE_CSA_LR1 != 0 && WIDTH >= 8) begin : gen_flops_layer_0_csa
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_sum_lr0_dff_inst (
             .clk (clk),
             .din (pp_sum_lr0_i[i]),
             .dout(pp_sum_lr0[i])
         );
-        register #(2 * WIDTH) pp_carry_lr0_dff_inst (
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_carry_lr0_dff_inst (
             .clk (clk),
             .din (pp_carry_lr0_i[i]),
             .dout(pp_carry_lr0[i])
         );
-        register #(2 * WIDTH) cf_dff_inst (
-            .clk (clk),
-            .din (cf[0]),
-            .dout(cf[1])
-        );
-      end else begin
+      end else begin : gen_flops_layer_0_csa_bypass
         assign pp_sum_lr0[i]   = pp_sum_lr0_i[i];
         assign pp_carry_lr0[i] = pp_carry_lr0_i[i];
-        assign cf[1]           = cf[0];
       end
     end
   endgenerate
@@ -212,27 +224,37 @@ module mul #(
   endgenerate
 
   generate
-    for (genvar i = 0; i < WIDTH / 2 / 4; i = i + 1) begin : gen_flops_layer_1_csa
-      if (PIPE_STAGE_CSA_LR2 & WIDTH >= 16) begin : gen_flops_layer_1_csa
-        register #(2 * WIDTH) pp_sum_lr1_dff_inst (
+    if (PIPE_STAGE_CSA_LR2 != 0 && WIDTH >= 16) begin : gen_flops_layer_1_cf
+      register #(
+          .WIDTH(2 * WIDTH)
+      ) cf_dff_inst (
+          .clk (clk),
+          .din (cf[1]),
+          .dout(cf[2])
+      );
+    end else if (WIDTH >= 16) begin : gen_flops_layer_1_cf_bypass
+      assign cf[2] = cf[1];
+    end
+
+    for (genvar i = 0; i < WIDTH / 2 / 4 / 2; i = i + 1) begin : gen_flops_layer_1_csa
+      if (PIPE_STAGE_CSA_LR2 != 0 && WIDTH >= 16) begin : gen_flops_layer_1_csa
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_sum_lr1_dff_inst (
             .clk (clk),
             .din (pp_sum_lr1_i[i]),
             .dout(pp_sum_lr1[i])
         );
-        register #(2 * WIDTH) pp_carry_lr1_dff_inst (
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_carry_lr1_dff_inst (
             .clk (clk),
             .din (pp_carry_lr1_i[i]),
             .dout(pp_carry_lr1[i])
         );
-        register #(2 * WIDTH) cf_dff_inst (
-            .clk (clk),
-            .din (cf[1]),
-            .dout(cf[2])
-        );
-      end else begin
+      end else begin : gen_flops_layer_1_csa_bypass
         assign pp_sum_lr1[i]   = pp_sum_lr1_i[i];
         assign pp_carry_lr1[i] = pp_carry_lr1_i[i];
-        assign cf[2]           = cf[1];
       end
     end
   endgenerate
@@ -261,27 +283,37 @@ module mul #(
   endgenerate
 
   generate
-    for (genvar i = 0; i < WIDTH / 2 / 4 / 2; i = i + 1) begin : gen_flops_layer_2_csa
-      if (PIPE_STAGE_CSA_LR3 & WIDTH >= 32) begin : gen_flops_layer_2_csa
-        register #(2 * WIDTH) pp_sum_lr2_dff_inst (
+    if (PIPE_STAGE_CSA_LR3 != 0 && WIDTH >= 32) begin : gen_flops_layer_2_cf
+      register #(
+          .WIDTH(2 * WIDTH)
+      ) cf_dff_inst (
+          .clk (clk),
+          .din (cf[2]),
+          .dout(cf[3])
+      );
+    end else if (WIDTH >= 32) begin : gen_flops_layer_2_cf_bypass
+      assign cf[3] = cf[2];
+    end
+
+    for (genvar i = 0; i < WIDTH / 2 / 4 / 2 / 2; i = i + 1) begin : gen_flops_layer_2_csa
+      if (PIPE_STAGE_CSA_LR3 != 0 && WIDTH >= 32) begin : gen_flops_layer_2_csa
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_sum_lr2_dff_inst (
             .clk (clk),
             .din (pp_sum_lr2_i[i]),
             .dout(pp_sum_lr2[i])
         );
-        register #(2 * WIDTH) pp_carry_lr2_dff_inst (
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_carry_lr2_dff_inst (
             .clk (clk),
             .din (pp_carry_lr2_i[i]),
             .dout(pp_carry_lr2[i])
         );
-        register #(2 * WIDTH) cf_dff_inst (
-            .clk (clk),
-            .din (cf[2]),
-            .dout(cf[3])
-        );
-      end else begin
+      end else begin : gen_flops_layer_2_csa_bypass
         assign pp_sum_lr2[i]   = pp_sum_lr2_i[i];
         assign pp_carry_lr2[i] = pp_carry_lr2_i[i];
-        assign cf[3]           = cf[2];
       end
     end
   endgenerate
@@ -310,27 +342,37 @@ module mul #(
   endgenerate
 
   generate
-    for (genvar i = 0; i < WIDTH / 2 / 4 / 2 / 2; i = i + 1) begin : gen_flops_layer_3_csa
-      if (PIPE_STAGE_CSA_LR4 & WIDTH >= 64) begin : gen_flops_layer_3_csa
-        register #(2 * WIDTH) pp_sum_lr3_dff_inst (
+    if (PIPE_STAGE_CSA_LR4 != 0 && WIDTH >= 64) begin : gen_flops_layer_3_cf
+      register #(
+          .WIDTH(2 * WIDTH)
+      ) cf_dff_inst (
+          .clk (clk),
+          .din (cf[3]),
+          .dout(cf[4])
+      );
+    end else if (WIDTH >= 64) begin : gen_flops_layer_3_cf_bypass
+      assign cf[4] = cf[3];
+    end
+
+    for (genvar i = 0; i < WIDTH / 2 / 4 / 2 / 2 / 2; i = i + 1) begin : gen_flops_layer_3_csa
+      if (PIPE_STAGE_CSA_LR4 != 0 && WIDTH >= 64) begin : gen_flops_layer_3_csa
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_sum_lr3_dff_inst (
             .clk (clk),
             .din (pp_sum_lr3_i[i]),
             .dout(pp_sum_lr3[i])
         );
-        register #(2 * WIDTH) pp_carry_lr3_dff_inst (
+        register #(
+            .WIDTH(2 * WIDTH)
+        ) pp_carry_lr3_dff_inst (
             .clk (clk),
             .din (pp_carry_lr3_i[i]),
             .dout(pp_carry_lr3[i])
         );
-        register #(2 * WIDTH) cf_dff_inst (
-            .clk (clk),
-            .din (cf[3]),
-            .dout(cf[4])
-        );
-      end else begin
+      end else begin : gen_flops_layer_3_csa_bypass
         assign pp_sum_lr3[i]   = pp_sum_lr3_i[i];
         assign pp_carry_lr3[i] = pp_carry_lr3_i[i];
-        assign cf[4]           = cf[3];
       end
     end
   endgenerate

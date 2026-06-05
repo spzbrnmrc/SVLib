@@ -77,7 +77,7 @@ module booth_encoder #(
   assign p_i = (unsign) ? ~s_i : e_i;
 
   generate
-    if (PIPE_STAGE) begin
+    if (PIPE_STAGE != 0) begin
       register #(WIDTH + 1) pp_out_dff_inst (
           .clk (clk),
           .din (pp_out_i),

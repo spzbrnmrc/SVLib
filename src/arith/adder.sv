@@ -33,7 +33,7 @@ module adder #(
           );
         end
       end
-      assign sum  = sum_i;
+      assign sum  = sum_i[WIDTH-1:0];
       assign cout = carry_i[WIDTH-1];
     end else if (ALGORITHM == 1) begin  /* Carry-Look-Ahead Adder */
       localparam integer CLA_WIDTH = 4;
