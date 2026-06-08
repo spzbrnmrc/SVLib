@@ -38,7 +38,7 @@
 
 module mul #(
     parameter integer WIDTH = 8,
-    parameter integer CPA_ALGORITHM = 1,  // 0: RCA, 1: CLA
+    parameter integer CPA_ALGORITHM = 1,  // 0: RCA, 1: CLA, 2: Kogge-Stone (2-stage pipelined)
     parameter integer PIPE_STAGE_AFTER_BOOTH = 1,  // Enable Flop stage after Booth encoder
     parameter integer PIPE_STAGE_CSA_LR1 = 0,  // Enable Flop stage after first layer of CSAs
     parameter integer PIPE_STAGE_CSA_LR2 = 0,  // Enable Flop stage after second layer of CSAs
@@ -50,10 +50,16 @@ module mul #(
 
     input  logic [WIDTH-1:0] a,
     input  logic [WIDTH-1:0] b,
-    input  logic             unsign,
+    input  logic             a_sign,
+    input  logic             b_sign,
     output logic [WIDTH-1:0] lower,
     output logic [WIDTH-1:0] upper
 );
+
+  logic [WIDTH-1:0] mc;
+  logic [WIDTH-1:0] mult;
+  logic             mc_sign;
+  logic             mult_unsign;
 
   logic [WIDTH:0] multiplicand_ext;
   logic [WIDTH:0] multiplicand_2x_ext;
@@ -65,17 +71,24 @@ module mul #(
   logic [2*WIDTH-1:0] pp_out[WIDTH/2:0];  // 8 + 1 extra in case is unsigned
   logic [WIDTH/2:0] p;
   logic [WIDTH/2:0] s;
-  logic unsign_i;
+  logic mult_unsign_i;
 
 
   logic [2*WIDTH-1:0] sum;
 
-  assign multiplicand_ext        = {~unsign & a[WIDTH-1], a[WIDTH-1:0]};
-  assign multiplicand_2x_ext     = {a[WIDTH-1:0], 1'b0};
-  assign multiplicand_neg_ext    = {~(~unsign & a[WIDTH-1]), ~a[WIDTH-1:0]};
-  assign multiplicand_neg_2x_ext = {~a[WIDTH-1:0], 1'b1};
+  // Booth scans the multiplier as unsigned; the multiplicand carries signed magnitude.
+  // Swap when A is unsigned and B is signed so the signed operand is always the multiplicand.
+  assign mc          = (~a_sign & b_sign) ? b : a;
+  assign mult        = (~a_sign & b_sign) ? a : b;
+  assign mc_sign     = (~a_sign & b_sign) ? b_sign : a_sign;
+  assign mult_unsign = (~a_sign & b_sign) ? ~a_sign : ~b_sign;
 
-  assign multiplier_ext          = {2'b0, b[WIDTH-1:0], 1'b0};
+  assign multiplicand_ext        = {mc_sign & mc[WIDTH-1], mc[WIDTH-1:0]};
+  assign multiplicand_2x_ext     = {mc[WIDTH-1:0], 1'b0};
+  assign multiplicand_neg_ext    = {~(mc_sign & mc[WIDTH-1]), ~mc[WIDTH-1:0]};
+  assign multiplicand_neg_2x_ext = {~mc[WIDTH-1:0], 1'b1};
+
+  assign multiplier_ext          = {2'b0, mult[WIDTH-1:0], 1'b0};
 
   generate
     for (genvar i = 0; i <= WIDTH / 2; i = i + 1) begin : gen_pp_out
@@ -87,7 +100,7 @@ module mul #(
             .PIPE_STAGE(PIPE_STAGE_AFTER_BOOTH)
         ) booth_encoder_inst (
             .clk                (clk),
-            .unsign             (unsign),
+            .mc_sign            (mc_sign),
             .multiplier         (multiplier_ext[2:0]),
             .multiplicand       (multiplicand_ext),
             .multiplicand_2x    (multiplicand_2x_ext),
@@ -106,7 +119,7 @@ module mul #(
             .PIPE_STAGE(PIPE_STAGE_AFTER_BOOTH)
         ) booth_encoder_inst (
             .clk                (clk),
-            .unsign             (unsign),
+            .mc_sign            (mc_sign),
             .multiplier         (multiplier_ext[2*i+2:2*i]),
             .multiplicand       (multiplicand_ext),
             .multiplicand_2x    (multiplicand_2x_ext),
@@ -123,14 +136,14 @@ module mul #(
   endgenerate
 
   generate
-    if (PIPE_STAGE_AFTER_BOOTH != 0) begin : gen_flops_unsign
-      register #(1) unsign_dff_inst (
+    if (PIPE_STAGE_AFTER_BOOTH != 0) begin : gen_flops_mult_unsign
+      register #(1) mult_unsign_dff_inst (
           .clk (clk),
-          .din (unsign),
-          .dout(unsign_i)
+          .din (mult_unsign),
+          .dout(mult_unsign_i)
       );
     end else begin
-      assign unsign_i = unsign;
+      assign mult_unsign_i = mult_unsign;
     end
   endgenerate
 
@@ -139,7 +152,7 @@ module mul #(
   localparam integer NUM_CF_STAGES = NUM_CSA_LAYERS + 1;
   logic [2*WIDTH-1:0] cf[NUM_CF_STAGES:0];
 
-  assign cf[0] = (unsign_i) ?  pp_out[WIDTH/2] | {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}} : {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}};
+  assign cf[0] = (mult_unsign_i) ?  pp_out[WIDTH/2] | {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}} : {{WIDTH+1{1'b0}}, s[WIDTH/2-1], {WIDTH-2{1'b0}}};
 
   /* ***** LAYER 0 of CSAs ***** */
   logic [2*WIDTH-1:0] pp_sum_lr0[(WIDTH / 2 / 4)-1:0];
@@ -421,17 +434,37 @@ module mul #(
   assign cf_carry_i_ext = {cf_carry_i[2*WIDTH-2:0], 1'b0};
 
   /* Final CPA */
-  adder_pipe #(
-      .WIDTH(2 * WIDTH),
-      .NUM_ADDERS(PIPE_STAGES_CPA)
-  ) adder_pipe_inst (
-      .clk (clk),
-      .in0 (cf_sum_i),
-      .in1 (cf_carry_i_ext),
-      .cin (1'b0),
-      .sum (sum),
-      .cout()
-  );
+  generate
+    if (CPA_ALGORITHM == 2) begin : gen_cpa_kogge
+      if ((1 << $clog2(2 * WIDTH)) != (2 * WIDTH)) begin : gen_cpa_kogge_width_error
+        initial $fatal(1, "mul: kogge_stone CPA requires 2*WIDTH to be a power of 2");
+      end else begin : gen_cpa_kogge_ok
+        kogge_stone_pipe #(
+            .WIDTH(2 * WIDTH)
+        ) kogge_stone_pipe_inst (
+            .clk (clk),
+            .in0 (cf_sum_i),
+            .in1 (cf_carry_i_ext),
+            .cin (1'b0),
+            .sum (sum),
+            .cout()
+        );
+      end
+    end else begin : gen_cpa_adder_pipe
+      adder_pipe #(
+          .WIDTH     (2 * WIDTH),
+          .NUM_ADDERS(PIPE_STAGES_CPA),
+          .ALGORITHM (CPA_ALGORITHM)
+      ) adder_pipe_inst (
+          .clk (clk),
+          .in0 (cf_sum_i),
+          .in1 (cf_carry_i_ext),
+          .cin (1'b0),
+          .sum (sum),
+          .cout()
+      );
+    end
+  endgenerate
 
 
   assign lower = sum[WIDTH-1:0];

@@ -42,7 +42,7 @@ module booth_encoder #(
 ) (
 
     input logic           clk,
-    input logic           unsign,
+    input logic           mc_sign,
     input logic [    2:0] multiplier,
     input logic [WIDTH:0] multiplicand,
     input logic [WIDTH:0] multiplicand_2x,
@@ -74,7 +74,7 @@ module booth_encoder #(
   assign s_i = multiplier[2] & ~(&multiplier[1:0]);
   assign e_i = ~((s_i ^ multiplicand[WIDTH-1]) & ~(&multiplier[2:0])) | ~(|multiplier[2:0]);
 
-  assign p_i = (unsign) ? ~s_i : e_i;
+  assign p_i = (mc_sign) ? e_i : ~s_i;
 
   generate
     if (PIPE_STAGE != 0) begin

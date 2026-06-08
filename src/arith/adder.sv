@@ -1,6 +1,6 @@
 module adder #(
     parameter integer WIDTH,
-    parameter integer ALGORITHM  // 0: Ripple-Carry, 1: Carry-Look-Ahead
+    parameter integer ALGORITHM  // 0: Ripple-Carry, 1: Carry-Look-Ahead, 2: Kogge-Stone
 ) (
     input  logic [WIDTH-1:0] in0,
     input  logic [WIDTH-1:0] in1,
@@ -70,6 +70,20 @@ module adder #(
         assign sum[CLA_WIDTH*(i+1)-1:CLA_WIDTH*i] = sum_i[i];
       end
       assign cout = carry_i[CLA_COUNT-1];
+    end else if (ALGORITHM == 2) begin  /* Kogge-Stone */
+      if ((1 << $clog2(WIDTH)) != WIDTH) begin : gen_ks_width_error
+        initial $fatal(1, "adder: kogge-stone requires WIDTH to be a power of 2");
+      end else begin : gen_ks_width_ok
+        kogge_stone_adder #(
+            .WIDTH(WIDTH)
+        ) kogge_stone_adder_inst (
+            .in0 (in0),
+            .in1 (in1),
+            .cin (cin),
+            .sum (sum),
+            .cout(cout)
+        );
+      end
     end
   endgenerate
 endmodule
