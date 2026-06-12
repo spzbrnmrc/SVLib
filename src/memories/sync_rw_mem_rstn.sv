@@ -49,11 +49,12 @@ module sync_rw_mem_rstn #(
       .dout(rvalid_out)
   );
 
-  register_sync_rstn #(
+  register_en_sync_rstn #(
       .WIDTH(WIDTH)
   ) rdata_ff (
       .clk (clk),
       .rstn(rstn),
+      .en  (rvalid_in),
       .din (mem[raddr]),
       .dout(rdata)
   );
