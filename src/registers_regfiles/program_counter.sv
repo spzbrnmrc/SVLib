@@ -54,7 +54,11 @@ module program_counter #(
     /* Data Signals */
     input  logic [PC_WIDTH-1:0] pc_in,
     output logic [PC_WIDTH-1:0] pc_out,
-    output logic                pc_out_valid
+    output logic                pc_out_valid,
+    // Value captured by the counter when load or inc is set. The current
+    // value when the counter holds. One incrementer feeds both this and the
+    // register, so a caller does not grow a second adder for the next PC.
+    output logic [PC_WIDTH-1:0] pc_next
 );
 
   logic [PC_WIDTH-1:0] pc_d, pc_q;
@@ -109,5 +113,6 @@ module program_counter #(
   end
 
   assign pc_out[PC_WIDTH-1:0] = (stall) ? last_pc[PC_WIDTH-1:0] : pc_q[PC_WIDTH-1:0];
+  assign pc_next = update_pc ? pc_d : pc_q;
 
 endmodule
