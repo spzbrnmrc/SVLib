@@ -49,6 +49,7 @@ module program_counter #(
 
   logic [PC_WIDTH-1:0] pc_d, pc_q;
   logic update_pc;
+  logic [PC_WIDTH-1:0] fetch_pc;
 
   register_en_sync_rstn_vector #(
       .WIDTH(PC_WIDTH)
@@ -63,11 +64,15 @@ module program_counter #(
 
   logic [PC_WIDTH-1:0] last_pc;
 
+  /* A load presents the target on fetch_pc immediately and steps the
+     flop past it, so the next cycle fetches the following instruction.
+     last_pc remembers that target: a stall replays it, and the release
+     cycle fetches the stepped PC. */
   always_ff @(posedge clk) begin
     if (!rstn) begin
       last_pc <= 'b0;
     end else if (!stall) begin
-      last_pc <= pc_q;
+      last_pc <= fetch_pc;
     end
   end
 
@@ -77,27 +82,31 @@ module program_counter #(
     })
       3'b1?0: begin  // Load
         update_pc = 1'b1;
-        pc_d = pc_in;
+        pc_d = pc_in + INC_AMOUNT;
         pc_out_valid = 1'b1;
+        fetch_pc = pc_in;
       end
       3'b??1: begin  // Stall
         update_pc = 1'b0;
         pc_d = 'b0;
         pc_out_valid = 1'b1;
+        fetch_pc = last_pc;
       end
       3'b010: begin  // Inc
         update_pc = 1'b1;
         pc_d = pc_q + INC_AMOUNT;
         pc_out_valid = 1'b1;
+        fetch_pc = pc_q;
       end
       default: begin
         pc_d = 'b0;
         update_pc = 1'b0;
         pc_out_valid = 1'b0;
+        fetch_pc = pc_q;
       end
     endcase
   end
 
-  assign pc_out[PC_WIDTH-1:0] = (stall) ? last_pc[PC_WIDTH-1:0] : pc_q[PC_WIDTH-1:0];
+  assign pc_out[PC_WIDTH-1:0] = fetch_pc[PC_WIDTH-1:0];
 
 endmodule

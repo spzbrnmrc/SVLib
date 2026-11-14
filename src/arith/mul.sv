@@ -28,7 +28,7 @@
 
 module mul #(
     parameter integer WIDTH = 8,
-    parameter integer CPA_ALGORITHM = 1,  // 0: RCA, 1: CLA, 2: Kogge-Stone (2-stage pipelined)
+    parameter integer CPA_ALGORITHM = 1,  // 0: RCA, 1: CLA, 2: Kogge-Stone (combinational if PIPE_STAGES_CPA is 0)
     parameter integer PIPE_STAGE_AFTER_BOOTH = 1,  // Enable Flop stage after Booth encoder
     parameter integer PIPE_STAGE_CSA_LR1 = 0,  // Enable Flop stage after first layer of CSAs
     parameter integer PIPE_STAGE_CSA_LR2 = 0,  // Enable Flop stage after second layer of CSAs
@@ -428,6 +428,16 @@ module mul #(
     if (CPA_ALGORITHM == 2) begin : gen_cpa_kogge
       if ((1 << $clog2(2 * WIDTH)) != (2 * WIDTH)) begin : gen_cpa_kogge_width_error
         initial $fatal(1, "mul: kogge_stone CPA requires 2*WIDTH to be a power of 2");
+      end else if (PIPE_STAGES_CPA == 0) begin : gen_cpa_kogge_comb
+        kogge_stone_adder #(
+            .WIDTH(2 * WIDTH)
+        ) kogge_stone_adder_inst (
+            .in0 (cf_sum_i),
+            .in1 (cf_carry_i_ext),
+            .cin (1'b0),
+            .sum (sum),
+            .cout()
+        );
       end else begin : gen_cpa_kogge_ok
         kogge_stone_pipe #(
             .WIDTH(2 * WIDTH)
